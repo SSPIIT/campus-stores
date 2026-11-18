@@ -158,7 +158,11 @@
     right +
     "</div></div>";
   const badge = (t, good = false) =>
-    '<span class="tag' + (good ? " good" : "") + '">' + esc(t) + "</span>";
+    '<span class="tag' +
+    (good ? " good" : /(^Out$|out$|^On loan$)/.test(t) ? " warn" : "") +
+    '">' +
+    esc(t) +
+    "</span>";
   // Kit status: one line per approved item, built from the loan slips,
   // so anyone on any shift can see what is still out and with whom.
   function kitLines(r) {
@@ -201,6 +205,14 @@
       btn("Cancel", "handcancel") +
       "</div></form>"
     );
+  }
+  function kitSummary(r) {
+    const lines = kitLines(r);
+    const out = lines.filter((x) => x.state === "Out").length;
+    const back = lines.filter((x) => x.state === "Returned").length;
+    if (!out && !back) return badge("Not issued");
+    if (!out) return badge("All returned", true);
+    return badge(out + " of " + lines.length + " out");
   }
   function kitPanel(r) {
     const lines = kitLines(r);
@@ -251,11 +263,60 @@
     }
     return html + "</div>";
   }
+  // "Waiting to come back": every open slip, with who has the unit now,
+  // so a shift that did not issue it can still close the right one.
+  function waitingList() {
+    const open = s.loans.filter((l) => !l.back);
+    if (!open.length) return "";
+    let html =
+      '<div class="waiting"><div class="kithead"><h3>Waiting to come back</h3><small>' +
+      open.length +
+      " unit" +
+      (open.length > 1 ? "s" : "") +
+      " out</small></div>";
+    for (const l of open) {
+      const a = getAsset(l.asset),
+        r = getReq(l.req);
+      const twins = assets.filter((x) => x.type === a.type && x.id !== a.id);
+      let sub =
+        a.model +
+        " · " +
+        r.club +
+        " (" +
+        r.id +
+        ") · Slip L-" +
+        l.num +
+        " · " +
+        (l.holder
+          ? "With " + l.holder + " · back " + l.holderDue + " · issued to " + l.who
+          : "With " + l.who + " · due " + l.due);
+      let html2 =
+        '<div class="row kitrow isout"><div><strong>' +
+        esc(a.id + " · " + a.type) +
+        "</strong><small>" +
+        esc(sub) +
+        "</small>";
+      if (twins.length)
+        html2 +=
+          '<small class="checklabel">Check the label: ' +
+          esc(
+            twins.map((t) => t.id + " (" + t.model + ")").join(", "),
+          ) +
+          " looks the same.</small>";
+      html +=
+        html2 +
+        '</div><div class="kitactions">' +
+        btn("Record return", "return", String(l.num), "primary") +
+        "</div></div>";
+    }
+    return html + "</div>";
+  }
   function requestPage() {
     let html = head(
       "Approved requests",
       "Student Activities Office · 3 approved forms",
     );
+    if (!s.selected) html += waitingList();
     if (s.selected) {
       const r = getReq(s.selected);
       html +=
@@ -282,7 +343,7 @@
           row(
             r.event,
             r.id + " · " + r.club,
-            btn("View form", "request", r.id),
+            kitSummary(r) + " " + btn("View form", "request", r.id),
           ),
         )
         .join("");

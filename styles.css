@@ -407,3 +407,23 @@ body > main {
   border-left: 4px solid var(--mark);
   background: var(--desk);
 }
+
+#campus-stores .tag.warn {
+  background: var(--memo);
+  color: var(--memotxt);
+  font-weight: 600;
+}
+#campus-stores .waiting {
+  margin: 12px 0 16px;
+  border: 1px solid var(--mark);
+  border-radius: 8px;
+  padding: 10px 14px;
+  background: var(--paper);
+}
+#campus-stores .checklabel {
+  color: var(--mark);
+  font-weight: 600;
+}
+#campus-stores .row > div:last-child {
+  text-align: right;
+}
