@@ -427,3 +427,11 @@ body > main {
 #campus-stores .row > div:last-child {
   text-align: right;
 }
+#campus-stores .handout {
+  border-color: var(--sel);
+}
+#campus-stores .hint {
+  color: var(--quiet);
+  font-size: 12px;
+  margin: 6px 0;
+}

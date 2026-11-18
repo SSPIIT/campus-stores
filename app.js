@@ -84,6 +84,7 @@
     },
   ];
   const pages = [
+    ["Today", "package-open"],
     ["Requests", "clipboard-list"],
     ["Inventory", "package"],
     ["Loan register", "book-open"],
@@ -91,8 +92,9 @@
   ];
   const original = () => ({
     version: 1,
-    tab: "Requests",
+    tab: "Today",
     phase: 0,
+    kitting: "",
     selected: "",
     filter: "All items",
     loans: [
@@ -306,8 +308,13 @@
       html +=
         html2 +
         '</div><div class="kitactions">' +
-        btn("Record return", "return", String(l.num), "primary") +
+        (s.handing === l.num
+          ? ""
+          : btn("Record return", "return", String(l.num), "primary") +
+            " " +
+            btn("Still with someone else", "hand", String(l.num))) +
         "</div></div>";
+      if (s.handing === l.num) html += handForm(l);
     }
     return html + "</div>";
   }
@@ -316,7 +323,7 @@
       "Approved requests",
       "Student Activities Office · 3 approved forms",
     );
-    if (!s.selected) html += waitingList();
+
     if (s.selected) {
       const r = getReq(s.selected);
       html +=
@@ -495,7 +502,88 @@
       '<form data-note><div class="form"><label class="full"><span>Note for the next shift</span><textarea name="note" rows="2" maxlength="400" required></textarea></label></div><button type="submit">Add handover note</button></form>'
     );
   }
+  // Today at the desk: the home screen. Says what the desk is for, what
+  // needs handing out, and what is waiting to come back.
+  function today() {
+    let html = head(
+      "Today at the desk",
+      "Lend approved equipment to clubs, take it back, and leave the next shift a clear picture.",
+    );
+    const pending = requests.filter((r) =>
+      kitLines(r).some((x) => x.state === "Not issued"),
+    );
+    html +=
+      '<div class="waiting handout"><div class="kithead"><h3>To hand out</h3><small>' +
+      pending.length +
+      " approved kit" +
+      (pending.length === 1 ? "" : "s") +
+      "</small></div>";
+    if (!pending.length) html += "<p>Nothing waiting to go out.</p>";
+    for (const r of pending) {
+      const missing = kitLines(r).filter((x) => x.state === "Not issued");
+      html +=
+        '<div class="row kitrow"><div><strong>' +
+        esc(r.club + " · " + r.event) +
+        "</strong><small>" +
+        esc(
+          missing.map((x) => x.type).join(", ") +
+            " · Return by " +
+            r.due +
+            " · " +
+            r.note,
+        ) +
+        '</small></div><div class="kitactions">' +
+        (s.kitting === r.id
+          ? ""
+          : btn("Issue kit", "kit", r.id, "primary")) +
+        "</div></div>";
+      if (s.kitting === r.id) html += kitForm(r, missing);
+    }
+    html += "</div>";
+    const waiting = waitingList();
+    return (
+      html +
+      (waiting ||
+        '<div class="waiting"><div class="kithead"><h3>Waiting to come back</h3></div><p>Nothing is out.</p></div>')
+    );
+  }
+  // One form for the whole kit instead of one slip at a time.
+  function kitForm(r, missing) {
+    const free = (type) =>
+      assets.filter((a) => a.type === type && !a.repair && !out(a.id));
+    let html = '<form data-kit class="handform"><div class="form">';
+    for (const { type } of missing) {
+      const units = free(type);
+      html +=
+        "<label><span>" +
+        esc(type) +
+        '</span><select name="unit" required>' +
+        (units.length
+          ? opts(units.map((a) => [a.id, a.id + " · " + a.model + " · Bin " + a.bin]))
+          : '<option value="">None on shelf</option>') +
+        "</select></label>";
+    }
+    html +=
+      '<label><span>Collected by</span><select name="who" required><option value="">Select…</option>' +
+      opts(people.map((p) => [p, p])) +
+      "</select></label>" +
+      '<label><span>Return by</span><select name="due" required>' +
+      opts(
+        ["Fri 8 pm", "Sat 9 am", "Sat 10 am", "Sat noon"].map((d) => [d, d]),
+      ).replace('value="' + r.due + '"', 'value="' + r.due + '" selected') +
+      "</select></label></div>" +
+      '<p class="hint">Check the Desk book if someone else is collecting for the club.</p>' +
+      '<div class="buttons"><button type="submit" class="primary">Issue ' +
+      missing.length +
+      " item" +
+      (missing.length === 1 ? "" : "s") +
+      "</button>" +
+      btn("Cancel", "kitcancel") +
+      "</div></form>";
+    return html;
+  }
   const screens = {
+    Today: today,
     Requests: requestPage,
     Inventory: inventory,
     "Loan register": register,
@@ -553,6 +641,7 @@
         s.tab = v;
         s.editing = false;
         s.handing = 0;
+        s.kitting = "";
         break;
       case "close":
         s.selected = "";
@@ -565,6 +654,12 @@
         break;
       case "cancel":
         s.editing = false;
+        break;
+      case "kit":
+        s.kitting = v;
+        break;
+      case "kitcancel":
+        s.kitting = "";
         break;
       case "hand":
         s.handing = Number(v);
@@ -601,6 +696,45 @@
       if (!text) return;
       s.notes.push({ phase: s.phase, text });
       commit("Handover note saved.");
+      return;
+    }
+    if (f.matches("[data-kit]")) {
+      const r = getReq(s.kitting);
+      const units = form.getAll("unit").map(getAsset);
+      const who = form.get("who"),
+        due = form.get("due");
+      if (!r || !people.includes(who) || !due) return;
+      for (const u of units) {
+        if (
+          !u ||
+          u.repair ||
+          out(u.id) ||
+          !r.items.includes(u.type) ||
+          s.loans.some(
+            (l) => l.req === r.id && !l.back && getAsset(l.asset).type === u.type,
+          )
+        ) {
+          q("[data-status]").textContent =
+            "One of those units is not available. Pick another.";
+          return;
+        }
+      }
+      const nums = [];
+      for (const u of units) {
+        const num = Math.max(...s.loans.map((l) => l.num)) + 1;
+        s.loans.push({ num, req: r.id, asset: u.id, who, due, back: false });
+        nums.push("L-" + num);
+      }
+      s.kitting = "";
+      commit(
+        "Issued " +
+          units.map((u) => u.id).join(", ") +
+          " to " +
+          who +
+          " on slips " +
+          nums.join(", ") +
+          ".",
+      );
       return;
     }
     if (f.matches("[data-hand]")) {
