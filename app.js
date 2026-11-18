@@ -107,6 +107,7 @@
     ],
     notes: [],
     editing: false,
+    handing: 0,
     onlyOpen: true,
     notice: "Sample shift · All records are fictional.",
   });
@@ -158,6 +159,98 @@
     "</div></div>";
   const badge = (t, good = false) =>
     '<span class="tag' + (good ? " good" : "") + '">' + esc(t) + "</span>";
+  // Kit status: one line per approved item, built from the loan slips,
+  // so anyone on any shift can see what is still out and with whom.
+  function kitLines(r) {
+    return r.items.map((type) => {
+      const slips = s.loans.filter(
+        (l) => l.req === r.id && getAsset(l.asset).type === type,
+      );
+      const loan = slips.find((l) => !l.back) || slips[slips.length - 1];
+      let state = "Not issued";
+      if (loan) state = loan.back ? "Returned" : "Out";
+      return { type, loan, state };
+    });
+  }
+  // Partial return: the unit stays on its slip, but the slip now records
+  // who actually has it and when it is coming back.
+  function handForm(loan) {
+    const pick = (label, key, list) =>
+      "<label><span>" +
+      label +
+      '</span><select name="' +
+      key +
+      '" required><option value="">Select…</option>' +
+      opts(list.map((x) => [x, x])) +
+      "</select></label>";
+    return (
+      '<form data-hand class="handform"><div class="form">' +
+      pick(
+        "Who has " + loan.asset + " now?",
+        "holder",
+        people.filter((p) => p !== loan.who),
+      ) +
+      pick("Bringing it back", "holderDue", [
+        "Sat 9 am",
+        "Sat 10 am",
+        "Sat noon",
+      ]) +
+      '</div><div class="buttons"><button type="submit" class="primary">Save on slip L-' +
+      loan.num +
+      "</button>" +
+      btn("Cancel", "handcancel") +
+      "</div></form>"
+    );
+  }
+  function kitPanel(r) {
+    const lines = kitLines(r);
+    const outCount = lines.filter((x) => x.state === "Out").length;
+    const backCount = lines.filter((x) => x.state === "Returned").length;
+    let html =
+      '<div class="kit"><div class="kithead"><h3>Kit status</h3><small>' +
+      backCount +
+      " of " +
+      lines.length +
+      " returned · " +
+      outCount +
+      " out</small></div>";
+    for (const { type, loan, state } of lines) {
+      const unit = loan ? getAsset(loan.asset) : null;
+      let sub = "No unit issued yet";
+      if (unit) {
+        sub = unit.id + " · " + unit.model + " · Slip L-" + loan.num + " · ";
+        if (loan.back) sub += "Back in stock";
+        else if (loan.holder)
+          sub +=
+            "Now with " +
+            loan.holder +
+            " · Back " +
+            loan.holderDue +
+            " · Issued to " +
+            loan.who;
+        else sub += "With " + loan.who + " · Due " + loan.due;
+      }
+      let actions = badge(state, state === "Returned");
+      if (state === "Out" && s.handing !== loan.num)
+        actions +=
+          " " +
+          btn("Record return", "return", String(loan.num)) +
+          " " +
+          btn("Still with someone else", "hand", String(loan.num));
+      html +=
+        '<div class="row kitrow ' +
+        (state === "Out" ? "isout" : state === "Returned" ? "isback" : "") +
+        '"><div><strong>' +
+        esc(type) +
+        "</strong><small>" +
+        esc(sub) +
+        '</small></div><div class="kitactions">' +
+        actions +
+        "</div></div>";
+      if (loan && s.handing === loan.num) html += handForm(loan);
+    }
+    return html + "</div>";
+  }
   function requestPage() {
     let html = head(
       "Approved requests",
@@ -181,7 +274,8 @@
         r.items.map((x) => "<li>" + x + "</li>").join("") +
         "</ul><p>" +
         r.note +
-        "</p></div>";
+        "</p></div>" +
+        kitPanel(r);
     } else
       html += requests
         .map((r) =>
@@ -287,7 +381,14 @@
     for (const l of shown)
       html += row(
         "L-" + l.num + " · " + l.asset,
-        l.req + " · " + l.who + " · Due " + l.due,
+        l.req +
+          " · " +
+          l.who +
+          " · Due " +
+          l.due +
+          (l.holder && !l.back
+            ? " · Now with " + l.holder + ", back " + l.holderDue
+            : ""),
         l.back
           ? badge("Returned")
           : btn("Record return", "return", String(l.num)),
@@ -390,6 +491,7 @@
       case "tab":
         s.tab = v;
         s.editing = false;
+        s.handing = 0;
         break;
       case "close":
         s.selected = "";
@@ -403,6 +505,12 @@
       case "cancel":
         s.editing = false;
         break;
+      case "hand":
+        s.handing = Number(v);
+        break;
+      case "handcancel":
+        s.handing = 0;
+        break;
       case "scope":
         s.onlyOpen = v === "0";
         break;
@@ -410,6 +518,7 @@
         const l = s.loans.find((l) => l.num === Number(v));
         if (!l || l.back) return;
         l.back = true;
+        s.handing = 0;
         s.notice = l.asset + " returned to stock. Slip L-" + l.num + " closed.";
         break;
       }
@@ -431,6 +540,26 @@
       if (!text) return;
       s.notes.push({ phase: s.phase, text });
       commit("Handover note saved.");
+      return;
+    }
+    if (f.matches("[data-hand]")) {
+      const l = s.loans.find((x) => x.num === s.handing && !x.back);
+      const holder = form.get("holder"),
+        holderDue = form.get("holderDue");
+      if (!l || !people.includes(holder) || !holderDue) return;
+      l.holder = holder;
+      l.holderDue = holderDue;
+      s.handing = 0;
+      commit(
+        l.asset +
+          " is still out on slip L-" +
+          l.num +
+          ", now with " +
+          holder +
+          ", back " +
+          holderDue +
+          ".",
+      );
       return;
     }
     if (!f.matches("[data-issue]")) return;

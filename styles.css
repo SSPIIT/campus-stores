@@ -369,3 +369,41 @@ body > main {
     min-height: 44px;
   }
 }
+
+/* Kit status panel on a request */
+#campus-stores .kit {
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 14px;
+  background: var(--paper);
+}
+#campus-stores .kithead {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+#campus-stores .kitrow {
+  border-left: 4px solid var(--line);
+  padding-left: 10px;
+}
+#campus-stores .kitrow.isout {
+  border-left-color: var(--mark);
+}
+#campus-stores .kitrow.isback {
+  border-left-color: var(--oktxt);
+}
+#campus-stores .kitactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-end;
+}
+#campus-stores .handform {
+  margin: 4px 0 10px 14px;
+  padding: 10px 12px;
+  border-left: 4px solid var(--mark);
+  background: var(--desk);
+}
