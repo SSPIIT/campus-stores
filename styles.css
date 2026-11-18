@@ -424,7 +424,7 @@ body > main {
   color: var(--mark);
   font-weight: 600;
 }
-#campus-stores .row > div:last-child {
+#campus-stores .row > div:last-child:not(:first-child) {
   text-align: right;
 }
 #campus-stores .handout {
@@ -434,4 +434,35 @@ body > main {
   color: var(--quiet);
   font-size: 12px;
   margin: 6px 0;
+}
+#campus-stores .kitgroup + .kitgroup {
+  margin-top: 6px;
+}
+#campus-stores .returnrow {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+#campus-stores .tick {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-weight: 600;
+}
+#campus-stores .notback {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-top: 6px;
+  color: var(--quiet);
+  font-size: 12px;
+}
+#campus-stores .returnrow:has(input:checked) .notback {
+  display: none;
+}
+#campus-stores .returnrow small {
+  display: block;
 }
