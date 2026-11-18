@@ -109,7 +109,7 @@
     ],
     notes: [],
     editing: false,
-    handing: 0,
+    returning: "",
     onlyOpen: true,
     notice: "Sample shift · All records are fictional.",
   });
@@ -178,36 +178,6 @@
       return { type, loan, state };
     });
   }
-  // Partial return: the unit stays on its slip, but the slip now records
-  // who actually has it and when it is coming back.
-  function handForm(loan) {
-    const pick = (label, key, list) =>
-      "<label><span>" +
-      label +
-      '</span><select name="' +
-      key +
-      '" required><option value="">Select…</option>' +
-      opts(list.map((x) => [x, x])) +
-      "</select></label>";
-    return (
-      '<form data-hand class="handform"><div class="form">' +
-      pick(
-        "Who has " + loan.asset + " now?",
-        "holder",
-        people.filter((p) => p !== loan.who),
-      ) +
-      pick("Bringing it back", "holderDue", [
-        "Sat 9 am",
-        "Sat 10 am",
-        "Sat noon",
-      ]) +
-      '</div><div class="buttons"><button type="submit" class="primary">Save on slip L-' +
-      loan.num +
-      "</button>" +
-      btn("Cancel", "handcancel") +
-      "</div></form>"
-    );
-  }
   function kitSummary(r) {
     const lines = kitLines(r);
     const out = lines.filter((x) => x.state === "Out").length;
@@ -245,12 +215,7 @@
         else sub += "With " + loan.who + " · Due " + loan.due;
       }
       let actions = badge(state, state === "Returned");
-      if (state === "Out" && s.handing !== loan.num)
-        actions +=
-          " " +
-          btn("Record return", "return", String(loan.num)) +
-          " " +
-          btn("Still with someone else", "hand", String(loan.num));
+
       html +=
         '<div class="row kitrow ' +
         (state === "Out" ? "isout" : state === "Returned" ? "isback" : "") +
@@ -261,12 +226,37 @@
         '</small></div><div class="kitactions">' +
         actions +
         "</div></div>";
-      if (loan && s.handing === loan.num) html += handForm(loan);
     }
     return html + "</div>";
   }
-  // "Waiting to come back": every open slip, with who has the unit now,
-  // so a shift that did not issue it can still close the right one.
+  // "Waiting to come back": open slips grouped by club kit, with who has
+  // each unit now, so a shift that did not issue it can close the right one.
+  function unitLine(l) {
+    const a = getAsset(l.asset);
+    const twins = assets.filter(
+      (x) => x.type === a.type && x.id !== a.id && x.bin === a.bin,
+    );
+    return (
+      "<strong>" +
+      esc(a.id + " · " + a.type) +
+      "</strong><small>" +
+      esc(
+        a.model +
+          " · Slip L-" +
+          l.num +
+          " · " +
+          (l.holder
+            ? "With " + l.holder + " · back " + l.holderDue + " · issued to " + l.who
+            : "With " + l.who + " · due " + l.due),
+      ) +
+      "</small>" +
+      (twins.length
+        ? '<small class="checklabel">Check the label: ' +
+          esc(twins.map((t) => t.id + " (" + t.model + ")").join(", ")) +
+          " looks the same.</small>"
+        : "")
+    );
+  }
   function waitingList() {
     const open = s.loans.filter((l) => !l.back);
     if (!open.length) return "";
@@ -276,47 +266,65 @@
       " unit" +
       (open.length > 1 ? "s" : "") +
       " out</small></div>";
-    for (const l of open) {
-      const a = getAsset(l.asset),
-        r = getReq(l.req);
-      const twins = assets.filter((x) => x.type === a.type && x.id !== a.id);
-      let sub =
-        a.model +
-        " · " +
-        r.club +
-        " (" +
-        r.id +
-        ") · Slip L-" +
-        l.num +
-        " · " +
-        (l.holder
-          ? "With " + l.holder + " · back " + l.holderDue + " · issued to " + l.who
-          : "With " + l.who + " · due " + l.due);
-      let html2 =
-        '<div class="row kitrow isout"><div><strong>' +
-        esc(a.id + " · " + a.type) +
-        "</strong><small>" +
-        esc(sub) +
-        "</small>";
-      if (twins.length)
-        html2 +=
-          '<small class="checklabel">Check the label: ' +
-          esc(
-            twins.map((t) => t.id + " (" + t.model + ")").join(", "),
-          ) +
-          " looks the same.</small>";
+    const reqIds = [...new Set(open.map((l) => l.req))];
+    for (const id of reqIds) {
+      const r = getReq(id);
+      const mine = open.filter((l) => l.req === id);
       html +=
-        html2 +
-        '</div><div class="kitactions">' +
-        (s.handing === l.num
-          ? ""
-          : btn("Record return", "return", String(l.num), "primary") +
-            " " +
-            btn("Still with someone else", "hand", String(l.num))) +
+        '<div class="kitgroup"><div class="row"><div><strong>' +
+        esc(r.club + " · " + r.event) +
+        "</strong><small>" +
+        mine.length +
+        " item" +
+        (mine.length > 1 ? "s" : "") +
+        " out · " +
+        esc(r.id) +
+        '</small></div><div class="kitactions">' +
+        (s.returning === id ? "" : btn("Return kit", "retkit", id, "primary")) +
         "</div></div>";
-      if (s.handing === l.num) html += handForm(l);
+      if (s.returning === id) html += returnForm(mine);
+      else
+        for (const l of mine)
+          html += '<div class="row kitrow isout"><div>' + unitLine(l) + "</div></div>";
+      html += "</div>";
     }
     return html + "</div>";
+  }
+  // Return kit: one checklist for the whole kit. Anything not ticked stays
+  // on its slip, with who has it now and when it will come back.
+  function returnForm(mine) {
+    const pick = (name, list, current) =>
+      '<select name="' +
+      name +
+      '">' +
+      opts(list.map((x) => [x, x])).replace(
+        'value="' + esc(current) + '"',
+        'value="' + esc(current) + '" selected',
+      ) +
+      "</select>";
+    let html = '<form data-return class="handform">';
+    for (const l of mine) {
+      html +=
+        '<div class="returnrow"><label class="tick"><input type="checkbox" name="back" value="' +
+        l.num +
+        '" checked /> Back now</label><div>' +
+        unitLine(l) +
+        '<div class="notback"><span>If not back: with</span>' +
+        pick("holder-" + l.num, people, l.holder || l.who) +
+        "<span>until</span>" +
+        pick(
+          "due-" + l.num,
+          ["Fri 8 pm", "Sat 9 am", "Sat 10 am", "Sat noon"],
+          l.holderDue || l.due,
+        ) +
+        "</div></div></div>";
+    }
+    return (
+      html +
+      '<div class="buttons"><button type="submit" class="primary">Save return</button>' +
+      btn("Cancel", "retcancel") +
+      "</div></form>"
+    );
   }
   function requestPage() {
     let html = head(
@@ -640,7 +648,7 @@
       case "tab":
         s.tab = v;
         s.editing = false;
-        s.handing = 0;
+        s.returning = "";
         s.kitting = "";
         break;
       case "close":
@@ -661,11 +669,11 @@
       case "kitcancel":
         s.kitting = "";
         break;
-      case "hand":
-        s.handing = Number(v);
+      case "retkit":
+        s.returning = v;
         break;
-      case "handcancel":
-        s.handing = 0;
+      case "retcancel":
+        s.returning = "";
         break;
       case "scope":
         s.onlyOpen = v === "0";
@@ -674,7 +682,7 @@
         const l = s.loans.find((l) => l.num === Number(v));
         if (!l || l.back) return;
         l.back = true;
-        s.handing = 0;
+        s.returning = "";
         s.notice = l.asset + " returned to stock. Slip L-" + l.num + " closed.";
         break;
       }
@@ -737,23 +745,28 @@
       );
       return;
     }
-    if (f.matches("[data-hand]")) {
-      const l = s.loans.find((x) => x.num === s.handing && !x.back);
-      const holder = form.get("holder"),
-        holderDue = form.get("holderDue");
-      if (!l || !people.includes(holder) || !holderDue) return;
-      l.holder = holder;
-      l.holderDue = holderDue;
-      s.handing = 0;
+    if (f.matches("[data-return]")) {
+      const ticked = form.getAll("back").map(Number);
+      const mine = s.loans.filter((l) => l.req === s.returning && !l.back);
+      const backIds = [],
+        later = [];
+      for (const l of mine) {
+        if (ticked.includes(l.num)) {
+          l.back = true;
+          backIds.push(l.asset);
+          continue;
+        }
+        const holder = form.get("holder-" + l.num),
+          due = form.get("due-" + l.num);
+        if (!people.includes(holder) || !due) return;
+        l.holder = holder;
+        l.holderDue = due;
+        later.push(l.asset + " with " + holder + " until " + due);
+      }
+      s.returning = "";
       commit(
-        l.asset +
-          " is still out on slip L-" +
-          l.num +
-          ", now with " +
-          holder +
-          ", back " +
-          holderDue +
-          ".",
+        (backIds.length ? "Returned " + backIds.join(", ") + "." : "") +
+          (later.length ? " Still out: " + later.join("; ") + "." : ""),
       );
       return;
     }
@@ -809,6 +822,12 @@
       loans: d.loans.map((l) => ({ ...l })),
       notes: d.notes.map((n) => ({ ...n })),
     };
+    // Always open on the home screen, whatever tab was last used.
+    s.tab = "Today";
+    s.selected = "";
+    s.editing = false;
+    s.kitting = "";
+    s.returning = "";
     paint();
   }
   paint();
